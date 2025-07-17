@@ -1,0 +1,76 @@
+pipeline {
+    agent any
+
+    tools {
+        maven "maven-3.9.9"
+    }
+
+    stages {
+        stage('NotifyStart') {
+            steps {
+                script {
+                    slackSend(
+                        color: '#FFFF00',
+                        message: "STARTED: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]' (${env.BUILD_URL})",
+                        channel: '#devops-practice'
+                    )
+                }
+            }
+        }
+
+        stage('GitCheckout') {
+            steps {
+                git branch: 'prod', url: 'https://github.com/RGANJAM-786/maven-webapplication-project-kkfunda.git'
+            }
+        }
+
+        stage('Build and Quality') {
+            parallel {
+                stage('Build') {
+                    steps {
+                        sh "mvn clean package"
+                        sh "sleep 20"
+                    }
+                }
+                stage('SonarQube Analysis') {
+                    steps {
+                        sh "mvn sonar:sonar"
+                    }
+                }
+            }
+        }
+
+        stage('Deploy') {
+            parallel {
+                stage('Deploy to Nexus') {
+                    steps {
+                        sh "mvn clean deploy"
+                        sh "sleep 20"
+                    }
+                }
+                stage('Deploy to Tomcat') {
+                    steps {
+                        sh """
+                            curl -u rakesh:password \\
+                            --upload-file target/maven-web-application.war \\
+                            "http://34.201.247.138:8080/manager/text/deploy?path=/maven-web-application&update=true"
+                        """
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                def buildStatus = currentBuild.currentResult ?: 'SUCCESS'
+                def colorCode = (buildStatus == 'SUCCESS') ? '#00FF00' : '#FF0000'
+                def subject = "${buildStatus}: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'"
+                def summary = "${subject} (${env.BUILD_URL})"
+
+                slackSend(color: colorCode, message: summary, channel: '#devops-practice')
+            }
+        }
+    }
+}
